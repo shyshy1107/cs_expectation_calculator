@@ -61,8 +61,6 @@ def get_price(marketHashNameList):
     response = requests.request("POST", URL, headers=headers, data=payload).json()
     if(response['msg']!="Success"):
         print(response)
-    else:
-        print(f"✅ 成功获取价格信息")
     time.sleep(0.9)
     return response
 to_search=[5,1,117,87,94,36,46,3,15,138,484,19,86]
@@ -242,22 +240,65 @@ def update_prices():
                 json.dump(data,g,ensure_ascii=False,indent=4)
         
 
-# 收集数据并保存到output.json
 def compute_expectations():
+    # 在函数内部重新定义output_data，避免全局状态问题
+    output_data = {
+        "更新时间": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+        "期望数据": []
+    }
+    
+    # 收集所有需要查询的材料名称
+    material_names_ft = []  # Field-Tested 材料
+    material_names_mw = []  # Minimal Wear 材料
+    material_mapping_ft = {}  # 记录材料名称对应的i
+    material_mapping_mw = {}  # 记录材料名称对应的i
+
+    # 第一遍：收集所有材料名称
+    for i in to_search:
+        # 久经沙场对应的材料
+        ft_material_name = material[i] + " (Field-Tested)"
+        material_names_ft.append(ft_material_name)
+        material_mapping_ft[ft_material_name] = i
+        
+        # 略有磨损对应的材料
+        mw_material_name = material[i] + " (Minimal Wear)"
+        material_names_mw.append(mw_material_name)
+        material_mapping_mw[mw_material_name] = i
+
+    # 批量获取价格
+    material_prices_ft = {}
+    if material_names_ft:
+        price_data_ft = get_price(material_names_ft)
+        if price_data_ft and 'data' in price_data_ft and 'success' in price_data_ft['data']:
+            material_prices_ft = price_data_ft['data']['success']
+
+    material_prices_mw = {}
+    if material_names_mw:
+        price_data_mw = get_price(material_names_mw)
+        if price_data_mw and 'data' in price_data_mw and 'success' in price_data_mw['data']:
+            material_prices_mw = price_data_mw['data']['success']
+
+    # 第二遍：处理每个箱子的数据
     for i in to_search:
         case_data = {}
         
         # 久经沙场
         with open(f"price/price_{i}久经沙场.json","r",encoding="utf-8") as f:
             data = json.load(f)
-            material_name = []
-            material_name.append(material[i] + " (Field-Tested)")
-            material_price = get_price(material_name)['data']['success'][material[i] + " (Field-Tested)"]['yyypSellPrice']
+            ft_material_name = material[i] + " (Field-Tested)"
+            
+            # 从批量获取的价格中查找
+            if ft_material_name in material_prices_ft:
+                material_price = material_prices_ft[ft_material_name]['yyypSellPrice']
+                print(f"{ft_material_name}价格：{material_price}")
+            else:
+                print(f"警告: 未找到 {ft_material_name} 的价格")
+                material_price = 0
             
             # 单次锻刀保本率
-            single_breakeven_rate = sum(item['yyypSellPrice'] / material_price / 4.9 > 1 for item in data.values()) / len(data.values())
+            single_breakeven_rate = sum(item['yyypSellPrice'] / material_price / 4.9 > 1 for item in data.values()) / len(data.values()) if material_price > 0 else 0
             
-            three_times_breakeven_rate = _breakeven_by_enumeration(f"{i}久经沙场", 3, material_price * 4.9)[0]
+            three_times_breakeven_rate = _breakeven_by_enumeration(f"{i}久经沙场", 3, material_price * 4.9)[0] if material_price > 0 else 0
             
             prices = [item['yyypSellPrice'] for item in data.values()]
             avg_price = sum(prices) / len(prices) if prices else 0
@@ -265,7 +306,7 @@ def compute_expectations():
             case_data["久经沙场"] = {
                 "期望收益": avg_price,
                 "材料参考底价": material_price,
-                "单次锻刀期望": avg_price / material_price / 5.0,
+                "单次锻刀期望": avg_price / material_price / 5.0 if material_price > 0 else 0,
                 "单次锻刀保本率": single_breakeven_rate,
                 "三次连续锻刀保本率": three_times_breakeven_rate,
             }
@@ -273,13 +314,19 @@ def compute_expectations():
         # 略有磨损
         with open(f"price/price_{i}略有磨损.json","r",encoding="utf-8") as f:
             data = json.load(f)
-            material_name = []
-            material_name.append(material[i] + " (Minimal Wear)")
-            material_price = get_price(material_name)['data']['success'][material[i] + " (Minimal Wear)"]['yyypSellPrice']
-
-            single_breakeven_rate = sum(item['yyypSellPrice'] / material_price / 5.5 > 1 for item in data.values()) / len(data.values())
+            mw_material_name = material[i] + " (Minimal Wear)"
             
-            three_times_breakeven_rate = _breakeven_by_enumeration(f"{i}略有磨损", 3, material_price * 5.5)[0]
+            # 从批量获取的价格中查找
+            if mw_material_name in material_prices_mw:
+                material_price = material_prices_mw[mw_material_name]['yyypSellPrice']
+                print(f"{mw_material_name}价格：{material_price}")
+            else:
+                print(f"警告: 未找到 {mw_material_name} 的价格")
+                material_price = 0
+
+            single_breakeven_rate = sum(item['yyypSellPrice'] / material_price / 5.5 > 1 for item in data.values()) / len(data.values()) if material_price > 0 else 0
+            
+            three_times_breakeven_rate = _breakeven_by_enumeration(f"{i}略有磨损", 3, material_price * 5.5)[0] if material_price > 0 else 0
             
             prices = [item['yyypSellPrice'] for item in data.values()]
             avg_price = sum(prices) / len(prices) if prices else 0
@@ -287,7 +334,7 @@ def compute_expectations():
             case_data["略有磨损"] = {
                 "期望收益": avg_price,
                 "材料参考底价": material_price,
-                "单次锻刀期望": avg_price / material_price / 5.0,
+                "单次锻刀期望": avg_price / material_price / 5.0 if material_price > 0 else 0,
                 "单次锻刀保本率": single_breakeven_rate,
                 "三次连续锻刀保本率": three_times_breakeven_rate,
             }
@@ -297,13 +344,12 @@ def compute_expectations():
             "数据": case_data
         })
 
-
-    # 将结果保存到output.json
+    # 将结果保存到期望.json
     with open("期望.json", "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=4)
     
     print("数据已保存到 期望.json")
-
+    
 def simulate():
     """模拟锻刀过程"""
     print()
@@ -401,7 +447,7 @@ def main_menu():
         print()
         print("1. 更新价格数据")
         print("2. 批量计算期望")
-        print("3. 计算保本率")
+        print("3. 计算保本率（枚举法）")
         print("4. 锻刀模拟器")
         print("5. 输出产物名称列表")
         print("6. 退出程序")
